@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bot Field</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(10, 40px);
+            grid-template-rows: repeat(10, 40px);
+            gap: 2px;
+            border: 2px solid #000;
+            background-color: #fff;
+            padding: 10px;
+        }
+        #energies {
+            margin-top: 20px;
+            font-family: Arial, sans-serif;
+        }
+        .cell {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            border: 1px solid #ccc;
+            font-size: 20px;
+            font-weight: bold;
+        }
+        .RED { color: red; }
+        .GREEN { color: green; }
+        .BLUE { color: blue; }
+        .YELLOW { color: yellow; }
+        .MAGENTA { color: magenta; }
+        .CYAN { color: cyan; }
+        .WHITE { color: black; }
+    </style>
+</head>
+<body>
+    <div class="grid" id="grid">
+        <!-- Las celdas se generarán con JS -->
+    </div>
+    <div id="energies"></div>
+
+    <script>
+        const gridElement = document.getElementById('grid');
+        const cells = [];
+
+        // Crear las celdas
+        for (let y = 0; y < 10; y++) {
+            for (let x = 0; x < 10; x++) {
+                const cell = document.createElement('div');
+                cell.className = 'cell';
+                cell.textContent = '.';
+                gridElement.appendChild(cell);
+                cells.push(cell);
+            }
+        }
+
+        // Conectar al WebSocket
+        const ws = new WebSocket('ws://' + window.location.host + '/ws/web');
+
+        ws.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            if (data.grid) {
+                updateGrid(data.grid);
+            }
+            if (data.energies) {
+                updateEnergies(data.energies);
+            }
+        };
+
+        function updateGrid(grid) {
+            for (let y = 0; y < 10; y++) {
+                for (let x = 0; x < 10; x++) {
+                    const cellData = grid[y][x];
+                    const cell = cells[y * 10 + x];
+                    if (typeof cellData === 'string') {
+                        cell.textContent = cellData;
+                        cell.className = 'cell';
+                    } else {
+                        cell.textContent = cellData.symbol;
+                        cell.className = 'cell ' + cellData.color;
+                    }
+                }
+            }
+        }
+
+        function updateEnergies(energies) {
+            const energiesDiv = document.getElementById('energies');
+            energiesDiv.innerHTML = '<h3>Energías de los Bots:</h3>';
+            for (const [botId, energy] of Object.entries(energies)) {
+                energiesDiv.innerHTML += `<p>${botId}: ${energy}</p>`;
+            }
+        }
+
+        ws.onopen = function() {
+            console.log('Conectado al servidor');
+        };
+
+        ws.onclose = function() {
+            console.log('Desconectado del servidor');
+        };
+
+        ws.onerror = function(error) {
+            console.error('Error en WebSocket:', error);
+        };
+    </script>
+</body>
+</html>
