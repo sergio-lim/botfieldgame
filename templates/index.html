@@ -6,49 +6,104 @@
     <title>Bot Field</title>
     <style>
         body {
-            font-family: Arial, sans-serif;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #4CAF50 0%, #2196F3 100%);
             margin: 0;
-            background-color: #f0f0f0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            color: #333;
+        }
+        h1 {
+            color: white;
+            margin-bottom: 20px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        .container {
+            display: flex;
+            gap: 40px;
+            align-items: flex-start;
+            max-width: 1200px;
+            width: 100%;
         }
         .grid {
             display: grid;
             grid-template-columns: repeat(10, 40px);
             grid-template-rows: repeat(10, 40px);
             gap: 2px;
-            border: 2px solid #000;
+            border: 3px solid #333;
             background-color: #fff;
-            padding: 10px;
-        }
-        #energies {
-            margin-top: 20px;
-            font-family: Arial, sans-serif;
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
         }
         .cell {
             display: flex;
             justify-content: center;
             align-items: center;
             border: 1px solid #ccc;
-            font-size: 20px;
+            font-size: 18px;
+            font-weight: bold;
+            border-radius: 4px;
+            background-color: #f9f9f9;
+        }
+        .RED { color: red; background-color: #ffe6e6; }
+        .GREEN { color: green; background-color: #e6ffe6; }
+        .BLUE { color: blue; background-color: #e6e6ff; }
+        .YELLOW { color: yellow; background-color: #ffffe6; }
+        .MAGENTA { color: magenta; background-color: #ffe6ff; }
+        .CYAN { color: cyan; background-color: #e6ffff; }
+        .TEAL { color: teal; background-color: #e6f7f7; }
+        .WHITE { color: black; background-color: #ffffff; }
+        .RED_dim { background-color: rgba(255, 230, 230, 0.3); }
+        .GREEN_dim { background-color: rgba(230, 255, 230, 0.3); }
+        .BLUE_dim { background-color: rgba(230, 230, 255, 0.3); }
+        .YELLOW_dim { background-color: rgba(255, 255, 230, 0.3); }
+        .MAGENTA_dim { background-color: rgba(255, 230, 255, 0.3); }
+        .CYAN_dim { background-color: rgba(230, 255, 255, 0.3); }
+        .TEAL_dim { background-color: rgba(230, 247, 247, 0.3); }
+        .WHITE_dim { background-color: rgba(255, 255, 255, 0.3); }
+        #energies {
+            background-color: rgba(255, 255, 255, 0.9);
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            min-width: 250px;
+        }
+        #energies h3 {
+            margin-top: 0;
+            color: #333;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+        .energy-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+        }
+        .energy-item:last-child {
+            border-bottom: none;
+        }
+        .bot-name {
             font-weight: bold;
         }
-        .RED { color: red; }
-        .GREEN { color: green; }
-        .BLUE { color: blue; }
-        .YELLOW { color: yellow; }
-        .MAGENTA { color: magenta; }
-        .CYAN { color: cyan; }
-        .WHITE { color: black; }
+        .energy-value {
+            color: #667eea;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
-    <div class="grid" id="grid">
-        <!-- Las celdas se generarán con JS -->
+    <h1>Bot Field Game</h1>
+    <div class="container">
+        <div class="grid" id="grid">
+            <!-- Las celdas se generarán con JS -->
+        </div>
+        <div id="energies"></div>
     </div>
-    <div id="energies"></div>
 
     <script>
         const gridElement = document.getElementById('grid');
@@ -98,7 +153,7 @@
             const energiesDiv = document.getElementById('energies');
             energiesDiv.innerHTML = '<h3>Energías de los Bots:</h3>';
             for (const [botId, energy] of Object.entries(energies)) {
-                energiesDiv.innerHTML += `<p>${botId}: ${energy}</p>`;
+                energiesDiv.innerHTML += `<div class="energy-item"><span class="bot-name">${botId}</span><span class="energy-value">${energy}</span></div>`;
             }
         }
 

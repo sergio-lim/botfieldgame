@@ -28,7 +28,8 @@ positions = {}  # nickname: (x, y)
 colors = {}     # nickname: color_name
 energy = {}     # nickname: int
 foods = set()   # set of (x, y)
-available_colors = ['RED', 'GREEN', 'BLUE', 'YELLOW', 'MAGENTA', 'CYAN', 'WHITE']
+paths = {}      # nickname: list of [x, y]
+available_colors = ['RED', 'GREEN', 'BLUE', 'YELLOW', 'MAGENTA', 'CYAN', 'TEAL', 'WHITE']
 
 # Inicializar colorama (para posibles logs futuros)
 init(autoreset=True)
@@ -36,9 +37,9 @@ init(autoreset=True)
 # Templates
 templates = Jinja2Templates(directory="templates")
 
-# Generar 6 comidas random al inicio
+# Generar 15 comidas random al inicio
 import random
-while len(foods) < 6:
+while len(foods) < 15:
     x = random.randint(0, 9)
     y = random.randint(0, 9)
     foods.add((x, y))
@@ -88,6 +89,15 @@ def get_grid():
         grid[y][x] = {"symbol": symbol, "color": color}
     for fx, fy in foods:
         grid[fy][fx] = 'F'
+    
+    # Marcar caminos recorridos con color tenue
+    for nick, path in paths.items():
+        color = colors.get(nick, 'WHITE')
+        dim_color = f"{color}_dim"
+        for px, py in path:
+            if grid[py][px] == '.':
+                grid[py][px] = {"symbol": "", "color": dim_color}
+    
     logger.debug(f"Grid generated with {len(positions)} positions and {len(foods)} foods")
     return grid
 
@@ -122,11 +132,15 @@ async def websocket_endpoint(websocket: WebSocket):
                     colors[nickname] = available_colors.pop(0)
                 else:
                     colors[nickname] = 'WHITE'  # Default si no hay más colores
-                energy[nickname] = 10  # Energía inicial
-                logger.info(f"Assigned color {colors[nickname]} to new nickname {nickname} with 10 energy")
+                energy[nickname] = 30  # Energía inicial
+                paths[nickname] = [[x, y]]  # Inicializar camino
+                logger.info(f"Assigned color {colors[nickname]} to new nickname {nickname} with 30 energy")
             # Actualizar posición
             positions[nickname] = (x, y)
             logger.debug(f"Updated position for {nickname}: ({x}, {y})")
+            
+            # Actualizar camino
+            paths[nickname] = data.get('path', paths.get(nickname, []))
             
             consumed = False
             # Consumir comida si hay
@@ -143,6 +157,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 del positions[nickname]
                 del colors[nickname]
                 del energy[nickname]
+                del paths[nickname]
                 logger.info(f"{nickname} died due to low energy")
                 # No broadcast aquí, ya que se hará después
             
@@ -221,12 +236,16 @@ async def http_ws_endpoint(request: Request):
                 colors[nickname] = available_colors.pop(0)
             else:
                 colors[nickname] = 'WHITE'  # Default si no hay más colores
-            energy[nickname] = 10  # Energía inicial
-            logger.info(f"Assigned color {colors[nickname]} to new nickname {nickname} with 10 energy")
+            energy[nickname] = 30  # Energía inicial
+            paths[nickname] = [[x, y]]  # Inicializar camino
+            logger.info(f"Assigned color {colors[nickname]} to new nickname {nickname} with 30 energy")
         
         # Actualizar posición
         positions[nickname] = (x, y)
         logger.debug(f"Updated position for {nickname}: ({x}, {y})")
+        
+        # Actualizar camino
+        paths[nickname] = data.get('path', paths.get(nickname, []))
         
         consumed = False
         # Consumir comida si hay
@@ -243,6 +262,7 @@ async def http_ws_endpoint(request: Request):
             del positions[nickname]
             del colors[nickname]
             del energy[nickname]
+            del paths[nickname]
             logger.info(f"{nickname} died due to low energy")
             # No broadcast aquí, ya que se hará después
         
