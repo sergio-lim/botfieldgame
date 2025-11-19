@@ -48,6 +48,7 @@
             font-weight: bold;
             border-radius: 4px;
             background-color: #f9f9f9;
+            position: relative;
         }
         .RED { color: red; background-color: #ffe6e6; }
         .GREEN { color: green; background-color: #e6ffe6; }
@@ -71,6 +72,7 @@
             border-radius: 10px;
             box-shadow: 0 4px 8px rgba(0,0,0,0.2);
             min-width: 250px;
+            margin-bottom: 20px;
         }
         #energies h3 {
             margin-top: 0;
@@ -94,6 +96,19 @@
             color: #667eea;
             font-weight: bold;
         }
+        #record {
+            background-color: rgba(255, 255, 255, 0.9);
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            min-width: 250px;
+        }
+        #record h3 {
+            margin-top: 0;
+            color: #333;
+            border-bottom: 2px solid #ff9800;
+            padding-bottom: 10px;
+        }
     </style>
 </head>
 <body>
@@ -102,7 +117,10 @@
         <div class="grid" id="grid">
             <!-- Las celdas se generarán con JS -->
         </div>
-        <div id="energies"></div>
+        <div>
+            <div id="energies"></div>
+            <div id="record"></div>
+        </div>
     </div>
 
     <script>
@@ -128,8 +146,14 @@
             if (data.grid) {
                 updateGrid(data.grid);
             }
+            if (data.remembered) {
+                updateRemembered(data.remembered);
+            }
             if (data.energies) {
                 updateEnergies(data.energies);
+            }
+            if (data.record) {
+                updateRecord(data.record);
             }
         };
 
@@ -139,11 +163,9 @@
                     const cellData = grid[y][x];
                     const cell = cells[y * 10 + x];
                     if (typeof cellData === 'string') {
-                        cell.textContent = cellData;
-                        cell.className = 'cell';
+                        cell.innerHTML = cellData;
                     } else {
-                        cell.textContent = cellData.symbol;
-                        cell.className = 'cell ' + cellData.color;
+                        cell.innerHTML = cellData.symbol;
                     }
                 }
             }
@@ -154,6 +176,26 @@
             energiesDiv.innerHTML = '<h3>Energías de los Bots:</h3>';
             for (const [botId, energy] of Object.entries(energies)) {
                 energiesDiv.innerHTML += `<div class="energy-item"><span class="bot-name">${botId}</span><span class="energy-value">${energy}</span></div>`;
+            }
+        }
+
+        function updateRemembered(remembered) {
+            let rememberedMap = {};
+            for (let bot in remembered) {
+                for (let pos of remembered[bot]) {
+                    let key = pos[0] + ',' + pos[1];
+                    if (!rememberedMap[key]) rememberedMap[key] = [];
+                    rememberedMap[key].push(bot[0].toUpperCase());
+                }
+            }
+            for (let y = 0; y < 10; y++) {
+                for (let x = 0; x < 10; x++) {
+                    const cell = cells[y * 10 + x];
+                    let key = x + ',' + y;
+                    if (rememberedMap[key]) {
+                        cell.innerHTML += '<span style="font-size:8px; position:absolute; top:0; right:0; color:red;">' + rememberedMap[key].join('') + '</span>';
+                    }
+                }
             }
         }
 

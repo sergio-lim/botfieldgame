@@ -7,14 +7,14 @@ async def bot():
     uri = "ws://localhost:8000/ws"
     nickname = "orion"
     energy = 10  # Energía inicial
+    energy_threshold = 10  # Umbral para custodiar comida
     
     # Posición inicial aleatoria
     x = random.randint(0, 9)
     y = random.randint(0, 9)
     
-    visited = set()  # Conjunto de posiciones visitadas
-    path = [[x, y]]  # Lista del camino recorrido
-    visited.add((x, y))  # Agregar posición inicial
+    known_foods = set()  # recordar posiciones de comida vistas
+    current_direction = (1, 0)  # Dirección inicial: derecha (dx, dy)
     
     async with websockets.connect(uri) as websocket:
         while True:
@@ -24,7 +24,7 @@ async def bot():
                 "y": y,
                 "nickname": nickname,
                 "energy": energy,
-                "path": path
+                "remembered": list(known_foods)
             }
             await websocket.send(json.dumps(data))
             print(f"Enviado: {data}")
@@ -38,57 +38,61 @@ async def bot():
             if 'energy' in response:
                 energy = response['energy']
             
-            # Si hay positions disponibles, elegir una vacía adyacente aleatoriamente para la próxima posición
+            # Si hay positions disponibles, elegir movimiento
             if "positions" in response and response["positions"]:
                 positions_list = response["positions"]
+                
                 # Encontrar comidas visibles
-                foods = [pos for pos in positions_list if pos['content'] == 'food']
-                if foods:
-                    # Encontrar la comida más cercana
-                    closest_food = min(foods, key=lambda f: abs(f['x'] - x) + abs(f['y'] - y))
-                    # Encontrar movimientos adyacentes válidos
-                    candidates = [pos for pos in positions_list if pos['content'] in [None, 'food'] and 0 <= pos['x'] < 10 and 0 <= pos['y'] < 10 and abs(pos['x'] - x) + abs(pos['y'] - y) == 1]
-                    if candidates:
-                        # Elegir el que tenga menor distancia a la comida más cercana
-                        new_pos = min(candidates, key=lambda p: abs(p['x'] - closest_food['x']) + abs(p['y'] - closest_food['y']))
-                        x, y = new_pos['x'], new_pos['y']
-                        visited.add((x, y))
-                        path.append([x, y])
-                        print(f"Moviendo hacia comida en ({closest_food['x']}, {closest_food['y']}): nueva posición ({x}, {y})")
+                foods = [pos for pos in positions_list if pos['content'] and pos['content']['type'] == 'food']
+                
+                # Actualizar memoria de comidas
+                for f in foods:
+                    known_foods.add((f['x'], f['y']))
+                
+                # Remover comidas recordadas que ya no existen (si el bot está en esa posición y no la ve)
+                if (x, y) in known_foods and not any(f['x'] == x and f['y'] == y for f in foods):
+                    known_foods.discard((x, y))
+                
+                candidates = [pos for pos in positions_list if (pos['content'] is None or pos['content']['type'] == 'food') and abs(pos['x'] - x) <= 1 and abs(pos['y'] - y) <= 1 and not (pos['x'] == x and pos['y'] == y)]
+                if not candidates:
+                    print("No hay movimientos disponibles")
+                    await asyncio.sleep(2)
+                    continue
+                
+                # Encontrar el objetivo más cercano: visible o recordado
+                all_targets = known_foods | {(f['x'], f['y']) for f in foods}
+                if all_targets:
+                    closest = min(all_targets, key=lambda p: abs(p[0] - x) + abs(p[1] - y))
+                    cx, cy = closest
+                    dist_to_closest = abs(cx - x) + abs(cy - y)
+                    
+                    # Verificar si es visible
+                    is_visible = any(f['x'] == cx and f['y'] == cy for f in foods)
+                    
+                    if is_visible and energy > energy_threshold and dist_to_closest <= 3:
+                        # Custodiar: moverse aleatoriamente alrededor de la comida
+                        print(f"Custodiando comida en ({cx}, {cy}) - moviendo alrededor")
+                        new_pos = random.choice(candidates)
                     else:
-                        # Movimiento random si no puede ir hacia comida
-                        valid_moves = [pos for pos in positions_list if pos['content'] in [None, 'food'] and 0 <= pos['x'] < 10 and 0 <= pos['y'] < 10 and abs(pos['x'] - x) + abs(pos['y'] - y) == 1]
-                        if valid_moves:
-                            new_pos = random.choice(valid_moves)
-                            x, y = new_pos['x'], new_pos['y']
-                            visited.add((x, y))
-                            path.append([x, y])
-                            print(f"Nueva posición aleatoria: ({x}, {y})")
-                        else:
-                            print("No hay movimientos disponibles")
+                        # Ir hacia el objetivo más cercano
+                        new_pos = min(candidates, key=lambda p: abs(p['x'] - cx) + abs(p['y'] - cy))
+                        print(f"Yendo a comida en ({cx}, {cy}) {'visible' if is_visible else 'recordada'}")
                 else:
-                    # Movimiento para explorar: elegir la posición adyacente más lejana a cualquier posición del camino
-                    valid_moves = [pos for pos in positions_list if pos['content'] in [None, 'food'] and 0 <= pos['x'] < 10 and 0 <= pos['y'] < 10 and abs(pos['x'] - x) + abs(pos['y'] - y) == 1]
-                    if valid_moves:
-                        # Calcular distancia mínima a cualquier posición del camino para cada movimiento válido
-                        move_scores = []
-                        for pos in valid_moves:
-                            nx, ny = pos['x'], pos['y']
-                            if path:
-                                min_dist = min(abs(nx - px) + abs(ny - py) for px, py in path)
-                            else:
-                                min_dist = 0  # Si no hay camino, distancia 0
-                            move_scores.append((min_dist, pos))
-                        # Elegir el movimiento con la mayor distancia mínima (más exploratorio)
-                        max_dist = max(score[0] for score in move_scores)
-                        best_moves = [pos for dist, pos in move_scores if dist == max_dist]
-                        new_pos = random.choice(best_moves)
-                        x, y = new_pos['x'], new_pos['y']
-                        visited.add((x, y))
-                        path.append([x, y])
-                        print(f"Nueva posición exploratoria: ({x}, {y}) con distancia {max_dist}")
+                    # No hay objetivos: modo supervivencia - explorar sistemáticamente
+                    preferred = [pos for pos in candidates if pos['x'] - x == current_direction[0] and pos['y'] - y == current_direction[1]]
+                    if preferred:
+                        new_pos = random.choice(preferred)
+                        print(f"Explorando en dirección {current_direction}")
                     else:
-                        print("No hay movimientos disponibles")
+                        new_pos = random.choice(candidates)
+                        # Actualizar dirección al movimiento elegido
+                        current_direction = (new_pos['x'] - x, new_pos['y'] - y)
+                        print(f"Cambiando dirección a {current_direction}")
+                
+                # Actualizar posición
+                x, y = new_pos['x'], new_pos['y']
+                x = max(0, min(9, x))
+                y = max(0, min(9, y))
             else:
                 print("No hay posiciones disponibles, manteniendo posición")
             
