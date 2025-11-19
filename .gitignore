@@ -1,0 +1,16 @@
+# Claves privadas y certificados
+*.pem
+*.key
+*.crt
+
+# Entorno virtual
+.venv/
+
+# Archivos de Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Logs
+*.log
