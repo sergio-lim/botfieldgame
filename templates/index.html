@@ -157,6 +157,20 @@
             }
         };
 
+        ws.onopen = function() {
+            console.log('Conectado al servidor');
+        };
+
+        ws.onclose = function() {
+            console.log('Desconectado del servidor');
+        };
+
+        ws.onerror = function(error) {
+            console.error('Error en WebSocket:', error);
+        };
+
+
+
         function updateGrid(grid) {
             for (let y = 0; y < 10; y++) {
                 for (let x = 0; x < 10; x++) {
@@ -199,17 +213,7 @@
             }
         }
 
-        ws.onopen = function() {
-            console.log('Conectado al servidor');
-        };
 
-        ws.onclose = function() {
-            console.log('Desconectado del servidor');
-        };
-
-        ws.onerror = function(error) {
-            console.error('Error en WebSocket:', error);
-        };
     </script>
 </body>
 </html>

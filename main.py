@@ -281,7 +281,6 @@ async def websocket_endpoint(websocket: WebSocket):
                     if 0 <= nx < 10 and 0 <= ny < 10:
                         # Verificar si hay un bot en esta posición
                         occupied = any(pos == (nx, ny) for pos in positions.values())
-                        content = 'bot' if occupied else None
                         # Verificar si hay comida
                         food_here = next((f for f in foods if isinstance(f, dict) and f['x'] == nx and f['y'] == ny), None)
                         if food_here:
@@ -291,7 +290,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         else:
                             content = None
                     else:
-                        content = None  # Fuera del mapa
+                        content = {'type': 'void'}  # Fuera del mapa
                     surroundings.append({'x': nx, 'y': ny, 'content': content})
             
             # Enviar respuesta
@@ -367,11 +366,13 @@ async def http_ws_endpoint(request: Request):
         
         consumed = False
         # Consumir comida si hay
-        if (x, y) in foods:
-            foods.remove((x, y))
-            energy[nickname] += 1
-            consumed = True
-            logger.debug(f"{nickname} consumed food at ({x}, {y}), energy now {energy[nickname]}")
+        for f in list(foods):
+            if isinstance(f, dict) and f['x'] == x and f['y'] == y:
+                foods.remove(f)
+                energy[nickname] += f['value']
+                consumed = True
+                logger.debug(f"{nickname} consumed food at ({x}, {y}), energy +{f['value']}, now {energy[nickname]}")
+                break
         
         # Perder energía solo si no consumió
         if not consumed:
@@ -394,14 +395,16 @@ async def http_ws_endpoint(request: Request):
                 if 0 <= nx < 10 and 0 <= ny < 10:
                     # Verificar si hay un bot en esta posición
                     occupied = any(pos == (nx, ny) for pos in positions.values())
-                    if (nx, ny) in foods:
-                        content = 'food'
+                    # Verificar si hay comida
+                    food_here = next((f for f in foods if isinstance(f, dict) and f['x'] == nx and f['y'] == ny), None)
+                    if food_here:
+                        content = {'type': 'food', 'value': food_here['value']}
                     elif occupied:
-                        content = 'bot'
+                        content = {'type': 'bot'}
                     else:
                         content = None
                 else:
-                    content = None  # Fuera del mapa
+                    content = {'type': 'void'}  # Fuera del mapa
                 surroundings.append({'x': nx, 'y': ny, 'content': content})
         
         # Enviar respuesta
