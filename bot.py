@@ -2,9 +2,11 @@ import asyncio
 import websockets
 import json
 import random
+import os
 
 async def bot():
-    uri = "ws://localhost:8000/ws"
+    # Usar variable de entorno para la URL del WebSocket, por defecto localhost
+    ws_url = os.getenv("WEBSOCKET_URL", "ws://localhost:8000/ws")
     nickname = "orion"
     energy = 10  # Energía inicial
     energy_threshold = 10  # Umbral para custodiar comida
@@ -16,7 +18,7 @@ async def bot():
     known_foods = set()  # recordar posiciones de comida vistas
     current_direction = (1, 0)  # Dirección inicial: derecha (dx, dy)
     
-    async with websockets.connect(uri) as websocket:
+    async with websockets.connect(ws_url) as websocket:
         while True:
             # Enviar datos actuales
             data = {
