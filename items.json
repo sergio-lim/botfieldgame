@@ -1,0 +1,56 @@
+{
+  "items": {
+    "food": {
+      "id": "food",
+      "label": "Food",
+      "symbol": "🍌",
+      "walkable": true,
+      "pickable": true,
+      "consumable": true,
+      "energy_value": 5,
+      "spawn_weight": 10,
+      "max_on_map": 15,
+      "respawn_interval_seconds": 35,
+      "description": "A food item that restores energy when a bot steps on it and consumes it."
+    },
+    "empty": {
+      "id": "empty",
+      "label": "Empty",
+      "symbol": ".",
+      "walkable": true,
+      "pickable": false,
+      "consumable": false,
+      "energy_value": 0,
+      "spawn_weight": 0,
+      "max_on_map": null,
+      "respawn_interval_seconds": null,
+      "description": "An empty tile. Bots can walk on it freely."
+    },
+    "void": {
+      "id": "void",
+      "label": "Void",
+      "symbol": " ",
+      "walkable": false,
+      "pickable": false,
+      "consumable": false,
+      "energy_value": 0,
+      "spawn_weight": 0,
+      "max_on_map": null,
+      "respawn_interval_seconds": null,
+      "description": "Outside the boundaries of the map. Bots cannot enter this tile."
+    },
+    "bot": {
+      "id": "bot",
+      "label": "Bot",
+      "symbol": null,
+      "walkable": false,
+      "pickable": false,
+      "consumable": false,
+      "energy_value": 0,
+      "spawn_weight": 0,
+      "max_on_map": null,
+      "respawn_interval_seconds": null,
+      "description": "A tile occupied by another bot. Bots cannot walk through each other."
+    }
+  }
+}
