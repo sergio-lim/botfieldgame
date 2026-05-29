@@ -5,50 +5,130 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Bot Field</title>
     <style>
+        :root {
+            --bg: #1a1a2e;
+            --bg-grad-start: #1a1a2e;
+            --bg-grad-end: #16213e;
+            --h1-color: #e0e0e0;
+            --panel-bg: rgba(30, 30, 50, 0.95);
+            --panel-shadow: 0 4px 8px rgba(0,0,0,0.5);
+            --panel-border: #667eea;
+            --panel-text: #e0e0e0;
+            --cell-bg: #2a2a3e;
+            --cell-border: #444;
+            --cell-text: #e0e0e0;
+            --grid-border: #555;
+            --grid-bg: #1e1e32;
+            --item-border: #3a3a5a;
+            --energy-label: #a0a0c0;
+        }
+        body.light {
+            --bg: #f0f4ff;
+            --bg-grad-start: #4CAF50;
+            --bg-grad-end: #2196F3;
+            --h1-color: white;
+            --panel-bg: rgba(255, 255, 255, 0.9);
+            --panel-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            --panel-border: #667eea;
+            --panel-text: #333;
+            --cell-bg: #f9f9f9;
+            --cell-border: #ccc;
+            --cell-text: #333;
+            --grid-border: #333;
+            --grid-bg: #fff;
+            --item-border: #eee;
+            --energy-label: #555;
+        }
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #4CAF50 0%, #2196F3 100%);
+            background: linear-gradient(135deg, var(--bg-grad-start) 0%, var(--bg-grad-end) 100%);
             margin: 0;
-            padding: 20px;
+            padding: 12px 16px;
+            box-sizing: border-box;
             display: flex;
             flex-direction: column;
-            align-items: center;
+            align-items: stretch;
             min-height: 100vh;
-            color: #333;
+            overflow-y: auto;
+            color: var(--panel-text);
+            transition: background 0.3s, color 0.3s;
+        }
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            margin-bottom: 10px;
+            flex-shrink: 0;
         }
         h1 {
-            color: white;
-            margin-bottom: 20px;
+            color: var(--h1-color);
+            margin: 0;
+            font-size: 1.4rem;
             text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+            text-align: center;
+        }
+        .theme-toggle {
+            position: absolute;
+            right: 0;
+            background: var(--panel-bg);
+            color: var(--panel-text);
+            border: 1px solid var(--panel-border);
+            border-radius: 20px;
+            padding: 5px 14px;
+            cursor: pointer;
+            font-size: 13px;
+            font-family: inherit;
+            transition: background 0.2s, color 0.2s;
+            white-space: nowrap;
+        }
+        .theme-toggle:hover {
+            opacity: 0.85;
         }
         .container {
             display: flex;
-            gap: 40px;
-            align-items: flex-start;
-            max-width: 1200px;
+            flex-direction: column;
+            align-items: center;
+            gap: 14px;
             width: 100%;
+            flex: 1;
+            min-height: 0;
+        }
+        .grid-wrapper {
+            flex: none;
+            height: 90vh;
+            width: 90vh;
+            display: flex;
+            align-items: stretch;
+            justify-content: stretch;
         }
         .grid {
             display: grid;
-            grid-template-columns: repeat(10, 40px);
-            grid-template-rows: repeat(10, 40px);
+            grid-template-columns: repeat(10, 1fr);
+            grid-template-rows: repeat(10, 1fr);
             gap: 2px;
-            border: 3px solid #333;
-            background-color: #fff;
-            padding: 15px;
-            border-radius: 10px;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            border: 2px solid var(--grid-border);
+            background-color: var(--grid-bg);
+            padding: 6px;
+            border-radius: 8px;
+            box-shadow: var(--panel-shadow);
+            width: 100%;
+            aspect-ratio: 1 / 1;
+            max-height: 100%;
+            box-sizing: border-box;
         }
         .cell {
             display: flex;
             justify-content: center;
             align-items: center;
-            border: 1px solid #ccc;
-            font-size: 18px;
+            border: 1px solid var(--cell-border);
+            font-size: clamp(10px, 2vw, 22px);
             font-weight: bold;
             border-radius: 4px;
-            background-color: #f9f9f9;
+            background-color: var(--cell-bg);
+            color: var(--cell-text);
             position: relative;
+            overflow: hidden;
         }
         .RED { color: red; background-color: #ffe6e6; }
         .GREEN { color: green; background-color: #e6ffe6; }
@@ -66,64 +146,103 @@
         .CYAN_dim { background-color: rgba(230, 255, 255, 0.3); }
         .TEAL_dim { background-color: rgba(230, 247, 247, 0.3); }
         .WHITE_dim { background-color: rgba(255, 255, 255, 0.3); }
+        .panels {
+            display: flex;
+            flex-direction: row;
+            gap: 14px;
+            justify-content: center;
+            width: 90vh;
+        }
         #energies {
-            background-color: rgba(255, 255, 255, 0.9);
-            padding: 20px;
+            background-color: var(--panel-bg);
+            padding: 12px 16px;
             border-radius: 10px;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-            min-width: 250px;
-            margin-bottom: 20px;
+            box-shadow: var(--panel-shadow);
+            flex: 1;
+            color: var(--panel-text);
+            overflow-y: auto;
         }
         #energies h3 {
             margin-top: 0;
-            color: #333;
-            border-bottom: 2px solid #667eea;
+            color: var(--panel-text);
+            border-bottom: 2px solid var(--panel-border);
             padding-bottom: 10px;
         }
         .energy-item {
             display: flex;
             justify-content: space-between;
             padding: 8px 0;
-            border-bottom: 1px solid #eee;
+            border-bottom: 1px solid var(--item-border);
         }
         .energy-item:last-child {
             border-bottom: none;
         }
         .bot-name {
             font-weight: bold;
+            color: var(--panel-text);
         }
         .energy-value {
-            color: #667eea;
             font-weight: bold;
         }
+        .energy-high  { color: #2e7d32; }
+        .energy-mid   { color: #f57c00; }
+        .energy-low   { color: #c62828; }
+        .cell-energy {
+            position: absolute;
+            bottom: 1px;
+            right: 2px;
+            font-size: 8px;
+            font-weight: bold;
+            color: var(--energy-label);
+            line-height: 1;
+        }
         #record {
-            background-color: rgba(255, 255, 255, 0.9);
-            padding: 20px;
+            background-color: var(--panel-bg);
+            color: var(--panel-text);
+            padding: 12px 16px;
             border-radius: 10px;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-            min-width: 250px;
+            box-shadow: var(--panel-shadow);
+            flex: 1;
         }
         #record h3 {
             margin-top: 0;
-            color: #333;
+            color: var(--panel-text);
             border-bottom: 2px solid #ff9800;
             padding-bottom: 10px;
         }
     </style>
 </head>
 <body>
-    <h1>Bot Field Game</h1>
+    <div class="header">
+        <h1>Bot Field Game</h1>
+        <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()">☀️ Light Mode</button>
+    </div>
     <div class="container">
-        <div class="grid" id="grid">
-            <!-- Las celdas se generarán con JS -->
+        <div class="grid-wrapper">
+            <div class="grid" id="grid">
+                <!-- Las celdas se generarán con JS -->
+            </div>
         </div>
-        <div>
+        <div class="panels">
             <div id="energies"></div>
             <div id="record"></div>
         </div>
     </div>
 
     <script>
+        // Dark mode is default; toggle to light
+        function toggleTheme() {
+            const body = document.body;
+            const btn = document.getElementById('themeToggle');
+            if (body.classList.contains('light')) {
+                body.classList.remove('light');
+                btn.textContent = '☀️ Light Mode';
+            } else {
+                body.classList.add('light');
+                btn.textContent = '🌙 Dark Mode';
+            }
+        }
+
         const gridElement = document.getElementById('grid');
         const cells = [];
 
@@ -144,11 +263,15 @@
 
         ws.onmessage = function(event) {
             const data = JSON.parse(event.data);
+            if (data.positions) {
+                // Build grid-coordinate map: botName -> {gx, gy}
+                botGridPositions = {};
+                for (const [botName, pos] of Object.entries(data.positions)) {
+                    botGridPositions[botName] = { gx: pos[0], gy: 9 - pos[1] };
+                }
+            }
             if (data.grid) {
                 updateGrid(data.grid);
-            }
-            if (data.remembered) {
-                updateRemembered(data.remembered);
             }
             if (data.energies) {
                 updateEnergies(data.energies);
@@ -172,48 +295,62 @@
 
 
 
+        let currentEnergies = {};
+
         function updateGrid(grid) {
             for (let y = 0; y < 10; y++) {
                 for (let x = 0; x < 10; x++) {
                     const cellData = grid[y][x];
                     const cell = cells[y * 10 + x];
+                    cell.className = 'cell';
+                    cell.innerHTML = '';
                     if (typeof cellData === 'string') {
                         cell.innerHTML = cellData;
-                    } else {
-                        cell.innerHTML = cellData.symbol;
+                    } else if (cellData && cellData.color) {
+                        cell.classList.add(cellData.color);
+                        cell.innerHTML = cellData.symbol || '';
+                        if (cellData.symbol) {
+                            const overlay = document.createElement('span');
+                            overlay.className = 'cell-energy';
+                            overlay.setAttribute('data-gridx', x);
+                            overlay.setAttribute('data-gridy', y);
+                            cell.appendChild(overlay);
+                        }
                     }
                 }
             }
+            refreshEnergyOverlays();
         }
 
         function updateEnergies(energies) {
+            currentEnergies = energies;
             const energiesDiv = document.getElementById('energies');
-            energiesDiv.innerHTML = '<h3>Energías de los Bots:</h3>';
-            for (const [botId, energy] of Object.entries(energies)) {
-                energiesDiv.innerHTML += `<div class="energy-item"><span class="bot-name">${botId}</span><span class="energy-value">${energy}</span></div>`;
+            energiesDiv.innerHTML = '<h3>Bot Energies:</h3>';
+            for (const [botName, eng] of Object.entries(energies)) {
+                const cls = eng > 15 ? 'energy-high' : eng > 5 ? 'energy-mid' : 'energy-low';
+                energiesDiv.innerHTML += `<div class="energy-item"><span class="bot-name">${botName}</span><span class="energy-value ${cls}">${eng}</span></div>`;
             }
+            refreshEnergyOverlays();
         }
 
-        function updateRemembered(remembered) {
-            let rememberedMap = {};
-            for (let bot in remembered) {
-                for (let pos of remembered[bot]) {
-                    let key = pos[0] + ',' + pos[1];
-                    if (!rememberedMap[key]) rememberedMap[key] = [];
-                    rememberedMap[key].push(bot[0].toUpperCase());
-                }
-            }
-            for (let y = 0; y < 10; y++) {
-                for (let x = 0; x < 10; x++) {
-                    const cell = cells[y * 10 + x];
-                    let key = x + ',' + y;
-                    if (rememberedMap[key]) {
-                        cell.innerHTML += '<span style="font-size:8px; position:absolute; top:0; right:0; color:red;">' + rememberedMap[key].join('') + '</span>';
+        // Store bot name -> grid position mapping updated each grid render
+        let botGridPositions = {};
+
+        function refreshEnergyOverlays() {
+            // Update all cell-energy overlays with current energy values
+            document.querySelectorAll('.cell-energy').forEach(overlay => {
+                const gx = parseInt(overlay.getAttribute('data-gridx'));
+                const gy = parseInt(overlay.getAttribute('data-gridy'));
+                // Find a bot whose position matches
+                for (const [botName, pos] of Object.entries(botGridPositions)) {
+                    if (pos.gx === gx && pos.gy === gy) {
+                        const eng = currentEnergies[botName];
+                        if (eng !== undefined) overlay.textContent = eng;
+                        break;
                     }
                 }
-            }
+            });
         }
-
 
     </script>
 </body>

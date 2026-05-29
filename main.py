@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -10,12 +11,17 @@ import time
 from datetime import datetime
 import asyncio
 import random
-#Hi
+
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    asyncio.create_task(regenerate_food())
+    yield
+
+app = FastAPI(lifespan=lifespan)
 
 # Middleware para logging de todas las peticiones HTTP
 class LoggingMiddleware(BaseHTTPMiddleware):
@@ -54,20 +60,23 @@ try:
 except FileNotFoundError:
     pass
 
-# Templates
-templates = Jinja2Templates(directory="templates")
+# Cargar definiciones de items
+with open("items.json", "r") as f:
+    ITEMS = json.load(f)["items"]
 
-# Generar 15 comidas random al inicio
+FOOD_DEF = ITEMS["food"]
+
+# Generar comidas iniciales según max_on_map definido en items.json
 import random
 foods = [f for f in foods if isinstance(f, dict)]  # Limpiar viejos tuples si existen
-foods = [{'x': i % 10, 'y': i // 10, 'value': 5} for i in range(15)]
+foods = [{'x': i % 10, 'y': i // 10, 'type': 'food', 'value': FOOD_DEF['energy_value']} for i in range(FOOD_DEF['max_on_map'])]
 
 # Función para regenerar comida
 async def regenerate_food():
     while True:
-        await asyncio.sleep(35)
+        await asyncio.sleep(FOOD_DEF['respawn_interval_seconds'])
         foods[:] = [f for f in foods if isinstance(f, dict)]  # Limpiar viejos tuples
-        if len(foods) < 15:
+        if len(foods) < FOOD_DEF['max_on_map']:
             # Encontrar posición vacía
             attempts = 0
             while attempts < 100:  # Evitar loop infinito
@@ -75,15 +84,13 @@ async def regenerate_food():
                 y = random.randint(0, 9)
                 pos = (x, y)
                 if not any(f.get('x') == x and f.get('y') == y for f in foods if isinstance(f, dict)) and pos not in positions.values():
-                    foods.append({'x': x, 'y': y, 'value': 5})
+                    foods.append({'x': x, 'y': y, 'type': 'food', 'value': FOOD_DEF['energy_value']})
                     logger.debug(f"Regenerated food at ({x}, {y})")
                     break
                 attempts += 1
 
-# Iniciar regeneración en startup
-@app.on_event("startup")
-async def startup_event():
-    asyncio.create_task(regenerate_food())
+# Templates
+templates = Jinja2Templates(directory="templates")
 
 # Manager para conexiones WebSocket de la web
 class ConnectionManager:
@@ -132,25 +139,26 @@ def get_grid():
             symbol = '🗿'
         else:
             symbol = nick[0].upper()  # Primera letra del nickname
-        grid[y][x] = {"symbol": symbol, "color": color}
+        grid[9 - y][x] = {"symbol": symbol, "color": color}
     for f in foods:
         if isinstance(f, dict):
-            grid[f['y']][f['x']] = '🍌'
+            item_def = ITEMS.get(f.get('type', 'food'), FOOD_DEF)
+            grid[9 - f['y']][f['x']] = item_def['symbol']
     
     # Marcar caminos recorridos con color tenue
     for nick, path in paths.items():
         color = colors.get(nick, 'WHITE')
         dim_color = f"{color}_dim"
         for px, py in path:
-            if grid[py][px] == '.':
-                grid[py][px] = {"symbol": "", "color": dim_color}
+            if grid[9 - py][px] == '.':
+                grid[9 - py][px] = {"symbol": "", "color": dim_color}
     
     logger.debug(f"Grid generated with {len(positions)} positions and {len(foods)} foods")
     return grid
 
 def reset_field():
     global foods, positions, colors, energy, paths, start_times, start_energies, last_bot_request_time
-    foods = [{'x': i % 10, 'y': i // 10, 'value': 5} for i in range(10)]
+    foods = [{'x': i % 10, 'y': i // 10, 'type': 'food', 'value': FOOD_DEF['energy_value']} for i in range(FOOD_DEF['max_on_map'])]
     positions.clear()
     colors.clear()
     energy.clear()
@@ -169,6 +177,52 @@ async def monitor_activity():
                 reset_field()
                 logger.info("Campo reiniciado por inactividad (>5s sin peticiones, habiendo tenido en últimos 10s)")
 
+# --- Bot WebSocket Protocol ---
+# Bots connect to WS /ws and send JSON each turn:
+#   {
+#     "nickname": str,          # bot's unique name
+#     "x":        int (0-9),    # current x position (x+1 = right, x-1 = left)
+#     "y":        int (0-9),    # current y position (y+1 = up,   y-1 = down)
+#     "energy":   int           # bot's current energy (managed by the bot itself)
+#   }
+#
+# The server responds with:
+#   {
+#     "positions": [            # up to 24 cells in a 5x5 area around the bot (radius 2),
+#                               # excluding the bot's own cell
+#       {
+#         "x": int,
+#         "y": int,
+#         "content": null       # empty cell
+#                  | {          # item on the cell (e.g. food)
+#                      "type":       str,   # item id, matches key in items.json (e.g. "food")
+#                      "value":      int,   # energy gained/lost when consumed
+#                      "walkable":   bool,  # whether the bot can step on this cell
+#                      "consumable": bool,  # whether the item is used up on contact
+#                      "symbol":     str,   # display emoji/character
+#                      "label":      str    # human-readable name
+#                    }
+#                  | {          # another bot occupying the cell
+#                      "type":     "bot",
+#                      "walkable": false
+#                    }
+#                  | {          # outside the 10x10 map boundary
+#                      "type":     "void",
+#                      "walkable": false
+#                    }
+#       }, ...
+#     ]
+#   }
+#
+# Item definitions and their full properties are in items.json.
+#
+# On death (energy <= 0) the server sends:
+#   {"positions": []}
+# and closes the loop for that bot.
+#
+# On invalid input the server sends:
+#   {"error": "..."}
+# ------------------------------
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     client_info = f"{websocket.client.host}:{websocket.client.port}" if websocket.client else "unknown"
@@ -184,8 +238,9 @@ async def websocket_endpoint(websocket: WebSocket):
             x = data.get('x')
             y = data.get('y')
             nickname = data.get('nickname')
+            bot_energy = data.get('energy')
             
-            if not (isinstance(x, int) and isinstance(y, int) and isinstance(nickname, str)):
+            if not (isinstance(x, int) and isinstance(y, int) and isinstance(nickname, str) and isinstance(bot_energy, int)):
                 logger.debug(f"Invalid data from {client_info}: {data}")
                 await websocket.send_json({"error": "Datos inválidos"})
                 continue
@@ -195,52 +250,25 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.send_json({"error": "Coordenadas fuera de rango 0-9"})
                 continue
             
-            # Asignar color si es nuevo
             if nickname not in colors:
                 if available_colors:
                     colors[nickname] = available_colors.pop(0)
                 else:
-                    colors[nickname] = 'WHITE'  # Default si no hay más colores
-                energy[nickname] = 10  # Energía inicial
-                paths[nickname] = [[x, y]]  # Inicializar camino
-                remembered[nickname] = set()  # Inicializar recordadas
+                    colors[nickname] = 'WHITE'
                 start_times[nickname] = time.time()
-                start_energies[nickname] = 10
-                logger.info(f"Assigned color {colors[nickname]} to new nickname {nickname} with 10 energy")
-            # Actualizar posición
+                start_energies[nickname] = bot_energy
+                logger.info(f"Assigned color {colors[nickname]} to new nickname {nickname}")
+            # Actualizar posición y energía reportada por el bot
             positions[nickname] = (x, y)
-            logger.debug(f"Updated position for {nickname}: ({x}, {y})")
+            energy[nickname] = bot_energy
+            logger.debug(f"Updated position for {nickname}: ({x}, {y}), energy: {bot_energy}")
             
-            # Actualizar camino
-            paths[nickname] = data.get('path', paths.get(nickname, []))
-            
-            # Actualizar comidas recordadas
-            remembered[nickname] = set(tuple(pos) for pos in data.get("remembered", []))
-            
-            consumed = False
-            # Consumir comida objetivo si especificada
-            if 'target_food' in data:
-                tx, ty = data['target_food']
-                for f in list(foods):  # copy to avoid modification during iteration
-                    if isinstance(f, dict) and f['x'] == tx and f['y'] == ty:
-                        foods.remove(f)
-                        energy[nickname] += f['value']
-                        consumed = True
-                        logger.debug(f"{nickname} consumed target food at ({tx}, {ty}), energy +{f['value']}, now {energy[nickname]}")
-                        break
-            
-            # Consumir comida si hay en la posición (por si acaso)
+            # Eliminar comida si el bot está sobre ella (actualiza el estado del campo)
             for f in list(foods):
                 if isinstance(f, dict) and f['x'] == x and f['y'] == y:
                     foods.remove(f)
-                    energy[nickname] += f['value']
-                    consumed = True
-                    logger.debug(f"{nickname} consumed food at ({x}, {y}), energy +{f['value']}, now {energy[nickname]}")
+                    logger.debug(f"{nickname} stepped on food at ({x}, {y}), removed from field")
                     break
-            
-            # Perder energía solo si no consumió
-            if not consumed:
-                energy[nickname] -= 1
             if energy[nickname] <= 0:
                 # Calcular tiempo de vida
                 duration = time.time() - start_times.get(nickname, time.time())
@@ -256,18 +284,15 @@ async def websocket_endpoint(websocket: WebSocket):
                 del positions[nickname]
                 del colors[nickname]
                 del energy[nickname]
-                del paths[nickname]
-                del remembered[nickname]
                 del start_times[nickname]
                 del start_energies[nickname]
                 logger.info(f"{nickname} died due to low energy")
-                # Remover bot del juego
-                del positions[nickname]
                 # Enviar respuesta de muerte
-                response = {"positions": [], "energy": 0}
+                response = {"positions": []}
                 await websocket.send_json(response)
                 # Broadcast el grid actualizado
-                grid_data = {"grid": get_grid(), "energies": dict(energy), "record": record, "remembered": {nick: list(rem) for nick, rem in remembered.items()}}
+                grid_data = {"grid": get_grid(), "energies": dict(energy), "record": record,
+                             "positions": {nick: list(pos) for nick, pos in positions.items()}}
                 await manager.broadcast(json.dumps(grid_data))
                 break  # Salir del loop para este bot muerto
             
@@ -281,26 +306,43 @@ async def websocket_endpoint(websocket: WebSocket):
                     if 0 <= nx < 10 and 0 <= ny < 10:
                         # Verificar si hay un bot en esta posición
                         occupied = any(pos == (nx, ny) for pos in positions.values())
-                        # Verificar si hay comida
-                        food_here = next((f for f in foods if isinstance(f, dict) and f['x'] == nx and f['y'] == ny), None)
-                        if food_here:
-                            content = {'type': 'food', 'value': food_here['value']}
+                        # Verificar si hay un item en esta posición
+                        item_here = next((f for f in foods if isinstance(f, dict) and f['x'] == nx and f['y'] == ny), None)
+                        if item_here:
+                            item_def = ITEMS.get(item_here.get('type', 'food'), FOOD_DEF)
+                            content = {
+                                'type': item_here.get('type', 'food'),
+                                'value': item_here['value'],
+                                'walkable': item_def['walkable'],
+                                'consumable': item_def['consumable'],
+                                'symbol': item_def['symbol'],
+                                'label': item_def['label']
+                            }
                         elif occupied:
-                            content = {'type': 'bot'}
+                            bot_def = ITEMS['bot']
+                            content = {
+                                'type': 'bot',
+                                'walkable': bot_def['walkable']
+                            }
                         else:
                             content = None
                     else:
-                        content = {'type': 'void'}  # Fuera del mapa
+                        void_def = ITEMS['void']
+                        content = {
+                            'type': 'void',
+                            'walkable': void_def['walkable']
+                        }
                     surroundings.append({'x': nx, 'y': ny, 'content': content})
             
             # Enviar respuesta
-            response = {"positions": surroundings, "energy": energy[nickname]}
+            response = {"positions": surroundings}
             logger.debug(f"Sending response to {client_info}")
             await websocket.send_json(response)
             logger.debug(f"Response sent to {client_info}")
             
             # Broadcast el grid actualizado a los clientes web
-            grid_data = {"grid": get_grid(), "energies": dict(energy), "record": record, "remembered": {nick: list(rem) for nick, rem in remembered.items()}}
+            grid_data = {"grid": get_grid(), "energies": dict(energy), "record": record,
+                         "positions": {nick: list(pos) for nick, pos in positions.items()}}
             logger.debug(f"Broadcasting grid update: {len(manager.active_connections)} connections")
             await manager.broadcast(json.dumps(grid_data))
     except Exception as e:
@@ -338,8 +380,9 @@ async def http_ws_endpoint(request: Request):
         x = data.get('x')
         y = data.get('y')
         nickname = data.get('nickname')
+        bot_energy = data.get('energy')
         
-        if not (isinstance(x, int) and isinstance(y, int) and isinstance(nickname, str)):
+        if not (isinstance(x, int) and isinstance(y, int) and isinstance(nickname, str) and isinstance(bot_energy, int)):
             logger.debug(f"Invalid data from {client_info}: {data}")
             return {"error": "Datos inválidos"}
         
@@ -352,38 +395,30 @@ async def http_ws_endpoint(request: Request):
             if available_colors:
                 colors[nickname] = available_colors.pop(0)
             else:
-                colors[nickname] = 'WHITE'  # Default si no hay más colores
-            energy[nickname] = 30  # Energía inicial
-            paths[nickname] = [[x, y]]  # Inicializar camino
-            logger.info(f"Assigned color {colors[nickname]} to new nickname {nickname} with 30 energy")
+                colors[nickname] = 'WHITE'
+            start_times[nickname] = time.time()
+            start_energies[nickname] = bot_energy
+            logger.info(f"Assigned color {colors[nickname]} to new nickname {nickname}")
         
-        # Actualizar posición
+        # Actualizar posición y energía reportada por el bot
         positions[nickname] = (x, y)
-        logger.debug(f"Updated position for {nickname}: ({x}, {y})")
+        energy[nickname] = bot_energy
+        logger.debug(f"Updated position for {nickname}: ({x}, {y}), energy: {bot_energy}")
         
-        # Actualizar camino
-        paths[nickname] = data.get('path', paths.get(nickname, []))
-        
-        consumed = False
-        # Consumir comida si hay
+        # Eliminar comida si el bot está sobre ella (actualiza el estado del campo)
         for f in list(foods):
             if isinstance(f, dict) and f['x'] == x and f['y'] == y:
                 foods.remove(f)
-                energy[nickname] += f['value']
-                consumed = True
-                logger.debug(f"{nickname} consumed food at ({x}, {y}), energy +{f['value']}, now {energy[nickname]}")
+                logger.debug(f"{nickname} stepped on food at ({x}, {y}), removed from field")
                 break
         
-        # Perder energía solo si no consumió
-        if not consumed:
-            energy[nickname] -= 1
         if energy[nickname] <= 0:
             del positions[nickname]
             del colors[nickname]
             del energy[nickname]
-            del paths[nickname]
+            del start_times[nickname]
+            del start_energies[nickname]
             logger.info(f"{nickname} died due to low energy")
-            # No broadcast aquí, ya que se hará después
         
         # Calcular las 24 posiciones alrededor en radio 2
         surroundings = []
@@ -395,24 +430,41 @@ async def http_ws_endpoint(request: Request):
                 if 0 <= nx < 10 and 0 <= ny < 10:
                     # Verificar si hay un bot en esta posición
                     occupied = any(pos == (nx, ny) for pos in positions.values())
-                    # Verificar si hay comida
-                    food_here = next((f for f in foods if isinstance(f, dict) and f['x'] == nx and f['y'] == ny), None)
-                    if food_here:
-                        content = {'type': 'food', 'value': food_here['value']}
+                    # Verificar si hay un item en esta posición
+                    item_here = next((f for f in foods if isinstance(f, dict) and f['x'] == nx and f['y'] == ny), None)
+                    if item_here:
+                        item_def = ITEMS.get(item_here.get('type', 'food'), FOOD_DEF)
+                        content = {
+                            'type': item_here.get('type', 'food'),
+                            'value': item_here['value'],
+                            'walkable': item_def['walkable'],
+                            'consumable': item_def['consumable'],
+                            'symbol': item_def['symbol'],
+                            'label': item_def['label']
+                        }
                     elif occupied:
-                        content = {'type': 'bot'}
+                        bot_def = ITEMS['bot']
+                        content = {
+                            'type': 'bot',
+                            'walkable': bot_def['walkable']
+                        }
                     else:
                         content = None
                 else:
-                    content = {'type': 'void'}  # Fuera del mapa
+                    void_def = ITEMS['void']
+                    content = {
+                        'type': 'void',
+                        'walkable': void_def['walkable']
+                    }
                 surroundings.append({'x': nx, 'y': ny, 'content': content})
         
         # Enviar respuesta
-        response = {"positions": surroundings, "energy": energy[nickname]}
+        response = {"positions": surroundings}
         logger.debug(f"Sending response to {client_info}")
         
         # Broadcast el grid actualizado a los clientes web
-        grid_data = {"grid": get_grid(), "energies": dict(energy)}
+        grid_data = {"grid": get_grid(), "energies": dict(energy), "record": record,
+                     "positions": {nick: list(pos) for nick, pos in positions.items()}}
         logger.debug(f"Broadcasting grid update: {len(manager.active_connections)} connections")
         await manager.broadcast(json.dumps(grid_data))
         
@@ -425,22 +477,25 @@ async def http_ws_endpoint(request: Request):
 async def get(request: Request):
     client_info = f"{request.client.host}:{request.client.port}" if request.client else "unknown"
     logger.debug(f"Serving index.html to {client_info}")
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse(request, "index.html")
 
 if __name__ == "__main__":
     import uvicorn
-    logger.debug("Starting server on 0.0.0.0:8000")
+    logger.debug("Starting server on 0.0.0.0:8001")
     
     async def main():
         # Inicializar comida
         global foods
-        foods = [f for f in foods if isinstance(f, dict)] + [{'x': random.randint(0,9), 'y': random.randint(0,9), 'value':5} for _ in range(10)]
+        foods = [f for f in foods if isinstance(f, dict)] + [
+            {'x': random.randint(0, 9), 'y': random.randint(0, 9), 'type': 'food', 'value': FOOD_DEF['energy_value']}
+            for _ in range(FOOD_DEF['max_on_map'])
+        ]
         
         # Lanzar tasks
         asyncio.create_task(regenerate_food())
         asyncio.create_task(monitor_activity())
         
-        config = uvicorn.Config(app, host="0.0.0.0", port=8000, log_level="warning")
+        config = uvicorn.Config(app, host="0.0.0.0", port=8001, log_level="warning")
         server = uvicorn.Server(config)
         await server.serve()
     
