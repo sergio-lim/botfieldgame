@@ -10,7 +10,7 @@
       "energy_value": 5,
       "spawn_weight": 10,
       "max_on_map": 15,
-      "respawn_interval_seconds": 35,
+      "respawn_interval_seconds": 10,
       "description": "A food item that restores energy when a bot steps on it and consumes it."
     },
     "empty": {
@@ -51,6 +51,19 @@
       "max_on_map": null,
       "respawn_interval_seconds": null,
       "description": "A tile occupied by another bot. Bots cannot walk through each other."
+    },
+    "poison": {
+      "id": "poison",
+      "label": "Poison",
+      "symbol": "🍄",
+      "walkable": true,
+      "pickable": true,
+      "consumable": true,
+      "energy_value": -3,
+      "spawn_weight": 3,
+      "max_on_map": 2,
+      "respawn_interval_seconds": 40,
+      "description": "A poisonous mushroom. Bots can walk on it and pick it up, but consuming it drains 3 energy."
     }
   }
 }
