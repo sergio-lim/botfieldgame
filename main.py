@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     asyncio.create_task(regenerate_food())
+    asyncio.create_task(regenerate_poison())
     yield
 
 app = FastAPI(lifespan=lifespan)
@@ -60,16 +61,34 @@ try:
 except FileNotFoundError:
     pass
 
+# Cargar leaderboard si existe
+leaderboard = {}  # nickname: best_seconds
+try:
+    with open("leaderboard.json", "r") as f:
+        leaderboard = json.load(f)
+except FileNotFoundError:
+    pass
+
 # Cargar definiciones de items
 with open("items.json", "r") as f:
     ITEMS = json.load(f)["items"]
 
 FOOD_DEF = ITEMS["food"]
+POISON_DEF = ITEMS["poison"]
 
 # Generar comidas iniciales según max_on_map definido en items.json
 import random
 foods = [f for f in foods if isinstance(f, dict)]  # Limpiar viejos tuples si existen
 foods = [{'x': i % 10, 'y': i // 10, 'type': 'food', 'value': FOOD_DEF['energy_value']} for i in range(FOOD_DEF['max_on_map'])]
+# Spawn initial poison items
+for i in range(POISON_DEF['max_on_map']):
+    attempts = 0
+    while attempts < 100:
+        px, py = random.randint(0, 9), random.randint(0, 9)
+        if not any(f.get('x') == px and f.get('y') == py for f in foods if isinstance(f, dict)):
+            foods.append({'x': px, 'y': py, 'type': 'poison', 'value': POISON_DEF['energy_value']})
+            break
+        attempts += 1
 
 # Función para regenerar comida
 async def regenerate_food():
@@ -86,6 +105,23 @@ async def regenerate_food():
                 if not any(f.get('x') == x and f.get('y') == y for f in foods if isinstance(f, dict)) and pos not in positions.values():
                     foods.append({'x': x, 'y': y, 'type': 'food', 'value': FOOD_DEF['energy_value']})
                     logger.debug(f"Regenerated food at ({x}, {y})")
+                    break
+                attempts += 1
+
+# Función para regenerar veneno
+async def regenerate_poison():
+    while True:
+        await asyncio.sleep(POISON_DEF['respawn_interval_seconds'])
+        current_poison = [f for f in foods if isinstance(f, dict) and f.get('type') == 'poison']
+        if len(current_poison) < POISON_DEF['max_on_map']:
+            attempts = 0
+            while attempts < 100:
+                x = random.randint(0, 9)
+                y = random.randint(0, 9)
+                pos = (x, y)
+                if not any(f.get('x') == x and f.get('y') == y for f in foods if isinstance(f, dict)) and pos not in positions.values():
+                    foods.append({'x': x, 'y': y, 'type': 'poison', 'value': POISON_DEF['energy_value']})
+                    logger.debug(f"Regenerated poison at ({x}, {y})")
                     break
                 attempts += 1
 
@@ -159,6 +195,14 @@ def get_grid():
 def reset_field():
     global foods, positions, colors, energy, paths, start_times, start_energies, last_bot_request_time
     foods = [{'x': i % 10, 'y': i // 10, 'type': 'food', 'value': FOOD_DEF['energy_value']} for i in range(FOOD_DEF['max_on_map'])]
+    for i in range(POISON_DEF['max_on_map']):
+        attempts = 0
+        while attempts < 100:
+            px, py = random.randint(0, 9), random.randint(0, 9)
+            if not any(f.get('x') == px and f.get('y') == py for f in foods if isinstance(f, dict)):
+                foods.append({'x': px, 'y': py, 'type': 'poison', 'value': POISON_DEF['energy_value']})
+                break
+            attempts += 1
     positions.clear()
     colors.clear()
     energy.clear()
@@ -176,6 +220,28 @@ async def monitor_activity():
             if elapsed > 5 and elapsed <= 10:
                 reset_field()
                 logger.info("Campo reiniciado por inactividad (>5s sin peticiones, habiendo tenido en últimos 10s)")
+
+def build_broadcast():
+    """Build the full grid broadcast payload including leaderboard and live times."""
+    now = time.time()
+    live_times = {nick: round(now - start_times[nick], 1) for nick in positions if nick in start_times}
+    return {
+        "grid": get_grid(),
+        "energies": dict(energy),
+        "record": record,
+        "positions": {nick: list(pos) for nick, pos in positions.items()},
+        "leaderboard": leaderboard,
+        "live_times": live_times,
+    }
+
+def update_leaderboard(nickname: str):
+    """Update leaderboard with this bot's current session time if it's a personal best."""
+    duration = round(time.time() - start_times.get(nickname, time.time()), 1)
+    if duration > leaderboard.get(nickname, 0):
+        leaderboard[nickname] = duration
+        with open("leaderboard.json", "w") as f:
+            json.dump(leaderboard, f)
+        logger.debug(f"Leaderboard updated: {nickname} = {duration}s")
 
 # --- Bot WebSocket Protocol ---
 # Bots connect to WS /ws and send JSON each turn:
@@ -281,6 +347,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     with open("records.json", "w") as f:
                         json.dump(record, f)
                     logger.info(f"New record: {nickname} survived {duration:.2f} seconds")
+                update_leaderboard(nickname)
                 del positions[nickname]
                 del colors[nickname]
                 del energy[nickname]
@@ -291,9 +358,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 response = {"positions": []}
                 await websocket.send_json(response)
                 # Broadcast el grid actualizado
-                grid_data = {"grid": get_grid(), "energies": dict(energy), "record": record,
-                             "positions": {nick: list(pos) for nick, pos in positions.items()}}
-                await manager.broadcast(json.dumps(grid_data))
+                await manager.broadcast(json.dumps(build_broadcast()))
                 break  # Salir del loop para este bot muerto
             
             # Calcular las 24 posiciones alrededor en radio 2
@@ -341,10 +406,8 @@ async def websocket_endpoint(websocket: WebSocket):
             logger.debug(f"Response sent to {client_info}")
             
             # Broadcast el grid actualizado a los clientes web
-            grid_data = {"grid": get_grid(), "energies": dict(energy), "record": record,
-                         "positions": {nick: list(pos) for nick, pos in positions.items()}}
             logger.debug(f"Broadcasting grid update: {len(manager.active_connections)} connections")
-            await manager.broadcast(json.dumps(grid_data))
+            await manager.broadcast(json.dumps(build_broadcast()))
     except Exception as e:
         import traceback
         logger.debug(f"Error in WebSocket /ws from {client_info}: {e}")
@@ -413,6 +476,7 @@ async def http_ws_endpoint(request: Request):
                 break
         
         if energy[nickname] <= 0:
+            update_leaderboard(nickname)
             del positions[nickname]
             del colors[nickname]
             del energy[nickname]
@@ -463,15 +527,32 @@ async def http_ws_endpoint(request: Request):
         logger.debug(f"Sending response to {client_info}")
         
         # Broadcast el grid actualizado a los clientes web
-        grid_data = {"grid": get_grid(), "energies": dict(energy), "record": record,
-                     "positions": {nick: list(pos) for nick, pos in positions.items()}}
         logger.debug(f"Broadcasting grid update: {len(manager.active_connections)} connections")
-        await manager.broadcast(json.dumps(grid_data))
+        await manager.broadcast(json.dumps(build_broadcast()))
         
         return response
     except Exception as e:
         logger.debug(f"Error parsing POST /ws from {client_info}: {e}")
         return {"error": "Invalid JSON"}
+
+@app.post("/kick")
+async def kick_bot(request: Request):
+    data = await request.json()
+    nickname = data.get("nickname")
+    if not isinstance(nickname, str) or nickname not in positions:
+        return {"error": "Bot not found"}
+    update_leaderboard(nickname)
+    del positions[nickname]
+    if nickname in colors:
+        available_colors.insert(0, colors.pop(nickname))
+    energy.pop(nickname, None)
+    paths.pop(nickname, None)
+    remembered.pop(nickname, None)
+    start_times.pop(nickname, None)
+    start_energies.pop(nickname, None)
+    logger.info(f"{nickname} was kicked by admin")
+    await manager.broadcast(json.dumps(build_broadcast()))
+    return {"ok": True}
 
 @app.get("/", response_class=HTMLResponse)
 async def get(request: Request):
@@ -493,6 +574,7 @@ if __name__ == "__main__":
         
         # Lanzar tasks
         asyncio.create_task(regenerate_food())
+        asyncio.create_task(regenerate_poison())
         asyncio.create_task(monitor_activity())
         
         config = uvicorn.Config(app, host="0.0.0.0", port=8001, log_level="warning")
