@@ -2,16 +2,17 @@
   "items": {
     "food": {
       "id": "food",
-      "label": "Food",
+      "label": "Banana",
       "symbol": "🍌",
       "walkable": true,
       "pickable": true,
       "consumable": true,
       "energy_value": 5,
-      "spawn_weight": 10,
+      "spawn_weight": 0,
       "max_on_map": 15,
       "respawn_interval_seconds": 10,
-      "description": "A food item that restores energy when a bot steps on it and consumes it."
+      "spawned_by": "banana_tree",
+      "description": "A banana that falls from a nearby banana tree. Restores energy when consumed."
     },
     "empty": {
       "id": "empty",
@@ -64,6 +65,21 @@
       "max_on_map": 2,
       "respawn_interval_seconds": 40,
       "description": "A poisonous mushroom. Bots can walk on it and pick it up, but consuming it drains 3 energy."
+    },
+    "banana_tree": {
+      "id": "banana_tree",
+      "label": "Banana Tree",
+      "symbol": "🌴",
+      "walkable": false,
+      "pickable": false,
+      "consumable": false,
+      "energy_value": 0,
+      "spawn_weight": 0,
+      "max_on_map": 3,
+      "respawn_interval_seconds": null,
+      "banana_radius": 1,
+      "spawns": "food",
+      "description": "A banana tree. Bots cannot walk through it. Bananas spawn on adjacent empty tiles."
     }
   }
 }
