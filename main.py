@@ -20,6 +20,17 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     asyncio.create_task(regenerate_food())
     asyncio.create_task(regenerate_poison())
+    # Start the activity monitor together with the regeneration tasks so
+    # background tasks are created when the app lifecycle starts.
+    asyncio.create_task(monitor_activity())
+    # Prune any existing child items (e.g. bananas) that are not adjacent to trees.
+    # This protects against residual state from previous runs or hot-reloads.
+    try:
+        valid_cells = cells_near_trees()
+        foods[:] = [f for f in foods if not (isinstance(f, dict) and f.get('type') == TREE_SPAWN_ID and (f['x'], f['y']) not in valid_cells)]
+    except Exception:
+        # If pruning fails for any reason, continue — it's non-fatal.
+        logger.debug("Failed to prune stray spawned items on startup")
     yield
 
 app = FastAPI(lifespan=lifespan)
@@ -75,38 +86,67 @@ with open("items.json", "r") as f:
 
 FOOD_DEF = ITEMS["food"]
 POISON_DEF = ITEMS["poison"]
+TREE_DEF = ITEMS["banana_tree"]
+# Resolve the item type that the tree spawns from its own definition
+TREE_SPAWN_ID = TREE_DEF["spawns"]          # "food"
+TREE_SPAWN_DEF = ITEMS[TREE_SPAWN_ID]       # same object as FOOD_DEF, driven by items.json
 
-# Generar comidas iniciales según max_on_map definido en items.json
+# Banana trees — static objects on the map
+trees = []  # list of {'x': int, 'y': int, 'type': 'banana_tree'}
+
+def spawn_trees():
+    """Place banana trees randomly at startup, avoiding overlaps. Count is random between 1 and max_on_map."""
+    trees.clear()
+    count = random.randint(1, TREE_DEF['max_on_map'])
+    attempts_total = 0
+    while len(trees) < count and attempts_total < 500:
+        tx, ty = random.randint(0, 9), random.randint(0, 9)
+        if not any(t['x'] == tx and t['y'] == ty for t in trees):
+            trees.append({'x': tx, 'y': ty, 'type': 'banana_tree'})
+        attempts_total += 1
+
+spawn_trees()
+
+def cells_near_trees():
+    """Return the 4 orthogonally adjacent cells to any tree (no diagonals)."""
+    candidates = set()
+    for t in trees:
+        for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
+            nx, ny = t['x'] + dx, t['y'] + dy
+            if 0 <= nx < 10 and 0 <= ny < 10:
+                if not any(tr['x'] == nx and tr['y'] == ny for tr in trees):
+                    candidates.add((nx, ny))
+    return candidates
+
+# Generar comidas iniciales cerca de los árboles
 import random
 foods = [f for f in foods if isinstance(f, dict)]  # Limpiar viejos tuples si existen
-foods = [{'x': i % 10, 'y': i // 10, 'type': 'food', 'value': FOOD_DEF['energy_value']} for i in range(FOOD_DEF['max_on_map'])]
+# Bananas are not pre-spawned; they appear only via regenerate_food()
 # Spawn initial poison items
 for i in range(POISON_DEF['max_on_map']):
     attempts = 0
     while attempts < 100:
         px, py = random.randint(0, 9), random.randint(0, 9)
-        if not any(f.get('x') == px and f.get('y') == py for f in foods if isinstance(f, dict)):
+        occupied_by_tree = any(t['x'] == px and t['y'] == py for t in trees)
+        if not any(f.get('x') == px and f.get('y') == py for f in foods if isinstance(f, dict)) and not occupied_by_tree:
             foods.append({'x': px, 'y': py, 'type': 'poison', 'value': POISON_DEF['energy_value']})
             break
         attempts += 1
 
-# Función para regenerar comida
+# Función para regenerar comida (bananas solo cerca de árboles)
 async def regenerate_food():
     while True:
-        await asyncio.sleep(FOOD_DEF['respawn_interval_seconds'])
-        foods[:] = [f for f in foods if isinstance(f, dict)]  # Limpiar viejos tuples
-        if len(foods) < FOOD_DEF['max_on_map']:
-            # Encontrar posición vacía
-            attempts = 0
-            while attempts < 100:  # Evitar loop infinito
-                x = random.randint(0, 9)
-                y = random.randint(0, 9)
-                pos = (x, y)
-                if not any(f.get('x') == x and f.get('y') == y for f in foods if isinstance(f, dict)) and pos not in positions.values():
-                    foods.append({'x': x, 'y': y, 'type': 'food', 'value': FOOD_DEF['energy_value']})
-                    logger.debug(f"Regenerated food at ({x}, {y})")
-                    break
-                attempts += 1
+        await asyncio.sleep(TREE_SPAWN_DEF['respawn_interval_seconds'])
+        current_bananas = [f for f in foods if isinstance(f, dict) and f.get('type') == TREE_SPAWN_ID]
+        if len(current_bananas) < TREE_SPAWN_DEF['max_on_map']:
+            occupied = {(f['x'], f['y']) for f in foods if isinstance(f, dict)}
+            occupied |= set(positions.values())
+            occupied |= {(t['x'], t['y']) for t in trees}
+            candidates = [c for c in cells_near_trees() if c not in occupied]
+            if candidates:
+                cx, cy = random.choice(candidates)
+                foods.append({'x': cx, 'y': cy, 'type': TREE_SPAWN_ID, 'value': TREE_SPAWN_DEF['energy_value']})
+                logger.debug(f"Regenerated {TREE_SPAWN_DEF['label']} at ({cx}, {cy}) near a {TREE_DEF['label']}")
 
 # Función para regenerar veneno
 async def regenerate_poison():
@@ -167,6 +207,9 @@ manager = ConnectionManager()
 def get_grid():
     logger.debug("Generating grid")
     grid = [['.' for _ in range(10)] for _ in range(10)]
+    # Draw trees first (static, below everything else)
+    for t in trees:
+        grid[9 - t['y']][t['x']] = TREE_DEF['symbol']
     for nick, (x, y) in positions.items():
         color = colors[nick]
         if nick == 'orion':
@@ -194,12 +237,15 @@ def get_grid():
 
 def reset_field():
     global foods, positions, colors, energy, paths, start_times, start_energies, last_bot_request_time
-    foods = [{'x': i % 10, 'y': i // 10, 'type': 'food', 'value': FOOD_DEF['energy_value']} for i in range(FOOD_DEF['max_on_map'])]
+    # Trees are NOT re-spawned on reset — they persist from startup
+    # Bananas are not pre-filled; regenerate_food() will populate them over time
+    foods = []
     for i in range(POISON_DEF['max_on_map']):
         attempts = 0
         while attempts < 100:
             px, py = random.randint(0, 9), random.randint(0, 9)
-            if not any(f.get('x') == px and f.get('y') == py for f in foods if isinstance(f, dict)):
+            occupied_by_tree = any(t['x'] == px and t['y'] == py for t in trees)
+            if not any(f.get('x') == px and f.get('y') == py for f in foods if isinstance(f, dict)) and not occupied_by_tree:
                 foods.append({'x': px, 'y': py, 'type': 'poison', 'value': POISON_DEF['energy_value']})
                 break
             attempts += 1
@@ -232,6 +278,7 @@ def build_broadcast():
         "positions": {nick: list(pos) for nick, pos in positions.items()},
         "leaderboard": leaderboard,
         "live_times": live_times,
+        "trees": [{"x": t["x"], "y": t["y"]} for t in trees],
     }
 
 def update_leaderboard(nickname: str):
@@ -369,11 +416,21 @@ async def websocket_endpoint(websocket: WebSocket):
                         continue  # No incluir la posición propia
                     nx, ny = x + dx, y + dy
                     if 0 <= nx < 10 and 0 <= ny < 10:
+                        # Verificar si hay un árbol en esta posición
+                        tree_here = next((t for t in trees if t['x'] == nx and t['y'] == ny), None)
                         # Verificar si hay un bot en esta posición
                         occupied = any(pos == (nx, ny) for pos in positions.values())
                         # Verificar si hay un item en esta posición
                         item_here = next((f for f in foods if isinstance(f, dict) and f['x'] == nx and f['y'] == ny), None)
-                        if item_here:
+                        if tree_here:
+                            content = {
+                                'type': 'banana_tree',
+                                'walkable': TREE_DEF['walkable'],
+                                'consumable': TREE_DEF['consumable'],
+                                'symbol': TREE_DEF['symbol'],
+                                'label': TREE_DEF['label']
+                            }
+                        elif item_here:
                             item_def = ITEMS.get(item_here.get('type', 'food'), FOOD_DEF)
                             content = {
                                 'type': item_here.get('type', 'food'),
@@ -492,11 +549,21 @@ async def http_ws_endpoint(request: Request):
                     continue  # No incluir la posición propia
                 nx, ny = x + dx, y + dy
                 if 0 <= nx < 10 and 0 <= ny < 10:
+                    # Verificar si hay un árbol en esta posición
+                    tree_here = next((t for t in trees if t['x'] == nx and t['y'] == ny), None)
                     # Verificar si hay un bot en esta posición
                     occupied = any(pos == (nx, ny) for pos in positions.values())
                     # Verificar si hay un item en esta posición
                     item_here = next((f for f in foods if isinstance(f, dict) and f['x'] == nx and f['y'] == ny), None)
-                    if item_here:
+                    if tree_here:
+                        content = {
+                            'type': 'banana_tree',
+                            'walkable': TREE_DEF['walkable'],
+                            'consumable': TREE_DEF['consumable'],
+                            'symbol': TREE_DEF['symbol'],
+                            'label': TREE_DEF['label']
+                        }
+                    elif item_here:
                         item_def = ITEMS.get(item_here.get('type', 'food'), FOOD_DEF)
                         content = {
                             'type': item_here.get('type', 'food'),
@@ -565,20 +632,15 @@ if __name__ == "__main__":
     logger.debug("Starting server on 0.0.0.0:8001")
     
     async def main():
-        # Inicializar comida
+        # Ensure foods list is clean when starting directly; do NOT pre-populate
+        # bananas here — they must be produced only by trees via regenerate_food().
         global foods
-        foods = [f for f in foods if isinstance(f, dict)] + [
-            {'x': random.randint(0, 9), 'y': random.randint(0, 9), 'type': 'food', 'value': FOOD_DEF['energy_value']}
-            for _ in range(FOOD_DEF['max_on_map'])
-        ]
-        
-        # Lanzar tasks
-        asyncio.create_task(regenerate_food())
-        asyncio.create_task(regenerate_poison())
-        asyncio.create_task(monitor_activity())
-        
+        foods = [f for f in foods if isinstance(f, dict)]
+
+        # Server startup will trigger the lifespan manager which creates the
+        # regeneration and monitoring background tasks.
         config = uvicorn.Config(app, host="0.0.0.0", port=8001, log_level="warning")
         server = uvicorn.Server(config)
         await server.serve()
-    
+
     asyncio.run(main())
