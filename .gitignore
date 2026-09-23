@@ -1,17 +1,39 @@
-# Claves privadas y certificados
+# Secrets and certificates
 *.pem
 *.key
 *.crt
+.env
+.env.*
 
-# Entorno virtual
+# Virtual environments
 .venv/
 venv/
+env/
 
-# Archivos de Python
+# Python
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
-# Logs
+# Databases and local runtime
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs and editors
 *.log
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
