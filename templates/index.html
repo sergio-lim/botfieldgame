@@ -113,6 +113,7 @@
             border-radius: 8px;
             box-shadow: var(--panel-shadow);
             width: 100%;
+            height: 100%;
             aspect-ratio: 1 / 1;
             max-height: 100%;
             box-sizing: border-box;
@@ -438,7 +439,7 @@
                 rows.push({ nick, best, live });
             }
             // Sort: highest of (live ?? best) descending
-            rows.sort((a, b) => Math.max(b.live ?? b.best, b.best) - Math.max(a.live ?? a.best, a.best));
+            rows.sort((a, b) => Math.max(b.live != null ? b.live : b.best, b.best) - Math.max(a.live != null ? a.live : a.best, a.best));
 
             let html = '<h3>Leaderboard</h3>';
             if (rows.length === 0) {
